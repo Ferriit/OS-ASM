@@ -1,6 +1,8 @@
 #ifndef INT_DYNAMIC_ARRAY_H
 #define INT_DYNAMIC_ARRAY_H
 
+#define nullptr NULL
+
 #include "mem.h"
 
 typedef struct {
@@ -116,6 +118,60 @@ static inline void *set(DynamicArray *arr, size_t index, void *element) {
     mem_memcpy(dest, element, arr->elem_size);
 
     return dest;
+}
+
+static inline int copy_array(DynamicArray *dest, const void *src) {
+    if (!dest || !src)
+        return 0; // failure
+
+    const DynamicArray *src_arr = (const DynamicArray *)src;
+
+    dest->data = alloc(src_arr->capacity * src_arr->elem_size);
+    if (!dest->data)
+        return 0; // allocation failed
+
+    mem_memcpy(dest->data,
+               src_arr->data,
+               src_arr->size * src_arr->elem_size);
+
+    dest->size = src_arr->size;
+    dest->capacity = src_arr->capacity;
+    dest->elem_size = src_arr->elem_size;
+
+    return 1; // success
+}
+
+static inline int append_array(DynamicArray *dest, const DynamicArray *src) {
+    if (!dest || !src)
+        return 0;
+
+    if (dest->elem_size != src->elem_size)
+        return 0; // incompatible element sizes
+
+    size_t required = dest->size + src->size;
+
+    if (required > dest->capacity) {
+        size_t new_capacity = dest->capacity ? dest->capacity : 1;
+        while (new_capacity < required)
+            new_capacity *= 2;
+
+        void *new_data = realloc(dest->data, new_capacity * dest->elem_size);
+        if (!new_data)
+            return 0;
+
+        dest->data = new_data;
+        dest->capacity = new_capacity;
+    }
+
+    void *dest_offset = (char *)dest->data + (dest->size * dest->elem_size);
+
+    mem_memcpy(dest_offset,
+               src->data,
+               src->size * src->elem_size);
+
+    dest->size = required;
+
+    return 1;
 }
 
 #endif
