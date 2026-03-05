@@ -12,7 +12,23 @@ typedef enum {
     TOKEN_RPAREN,
     TOKEN_LBRACE,
     TOKEN_RBRACE,
-    TOKEN_EOF
+    TOKEN_EOF,
+
+    TOKEN_KEYWORD_START,
+
+    KEYWORD_INT,
+    KEYWORD_STR,
+    KEYWORD_CHAR,
+    KEYWORD_BOOL,
+    KEYWORD_HASH,
+    KEYWORD_ARR,
+    KEYWORD_VOID,
+    KEYWORD_FUNC,
+    KEYWORD_RETURN,
+    KEYWORD_IF,
+    KEYWORD_ELSE,
+
+    TOKEN_KEYWORD_END
 } TokenType;
 
 typedef struct {
@@ -36,6 +52,21 @@ void printToken(Token tok) {
         case TOKEN_LBRACE:     type_str = "LBRACE";     break;
         case TOKEN_RBRACE:     type_str = "RBRACE";     break;
         case TOKEN_EOF:        type_str = "EOF";        break;
+
+        case TOKEN_KEYWORD_START: type_str = "TK_START";break;
+        case TOKEN_KEYWORD_END:type_str = "TK_END";		break;
+
+        case KEYWORD_INT:		type_str = "K_INT";		break;
+        case KEYWORD_STR:		type_str = "K_STR";		break;
+        case KEYWORD_CHAR:		type_str = "K_CHAR";	break;
+        case KEYWORD_BOOL:		type_str = "K_BOOL";	break;
+        case KEYWORD_HASH:		type_str = "K_HASH";	break;
+        case KEYWORD_ARR:		type_str = "K_ARR";		break;
+        case KEYWORD_VOID:		type_str = "K_VOID";	break;
+        case KEYWORD_FUNC:		type_str = "K_FUNC";	break;
+        case KEYWORD_RETURN:	type_str = "K_RETURN";	break;
+        case KEYWORD_IF:		type_str = "K_IF";		break;
+        case KEYWORD_ELSE:		type_str = "K_ELSE";	break;
     }
 
     printf("%-12s : ", type_str);
@@ -60,7 +91,7 @@ DynamicArray removeComments(DynamicArray code) {
         if ((c == '"' || c == '\'') && prev_char != '\\') {
             in_string = !in_string;
         }
-        
+
         if (!in_string) {
             if (c == '#') {
                 while (i < code.size && *(char *)get(&code, i) != '\n') {
@@ -125,6 +156,33 @@ DynamicArray splitTokens(DynamicArray code) {
     return parts;
 }
 
+static TokenType check_keyword(DynamicArray *value) {
+    char buf[64];
+    size_t len = value->size;
+
+    if (len >= sizeof(buf))
+        return TOKEN_IDENTIFIER;
+
+    for (size_t i = 0; i < len; i++)
+        buf[i] = *(char *)get(value, i);
+
+    buf[len] = '\0';
+
+    if (strcmp(buf, "int") == 0)    return KEYWORD_INT;
+    if (strcmp(buf, "str") == 0)    return KEYWORD_STR;
+    if (strcmp(buf, "char") == 0)   return KEYWORD_CHAR;
+    if (strcmp(buf, "bool") == 0)   return KEYWORD_BOOL;
+    if (strcmp(buf, "hash") == 0)   return KEYWORD_HASH;
+    if (strcmp(buf, "arr") == 0)    return KEYWORD_ARR;
+    if (strcmp(buf, "void") == 0)   return KEYWORD_VOID;
+    if (strcmp(buf, "func") == 0)   return KEYWORD_FUNC;
+    if (strcmp(buf, "return") == 0) return KEYWORD_RETURN;
+    if (strcmp(buf, "if") == 0)     return KEYWORD_IF;
+    if (strcmp(buf, "else") == 0)   return KEYWORD_ELSE;
+
+    return TOKEN_IDENTIFIER;
+}
+
 DynamicArray tokenize(DynamicArray parts) {
     DynamicArray tokens;
     init_array(&tokens, sizeof(Token));
@@ -143,6 +201,7 @@ DynamicArray tokenize(DynamicArray parts) {
 
         if (part.size == 1) {
             char c = *(char *)get(&part, 0);
+
             switch (c) {
                 case ';': token.type = TOKEN_SEMICOLON; break;
                 case ',': token.type = TOKEN_COMMA; break;
@@ -150,14 +209,21 @@ DynamicArray tokenize(DynamicArray parts) {
                 case ')': token.type = TOKEN_RPAREN; break;
                 case '{': token.type = TOKEN_LBRACE; break;
                 case '}': token.type = TOKEN_RBRACE; break;
-                case '+': case '-': case '*': case '/': case '=': 
-                    token.type = TOKEN_OPERATOR; break;
-                default: 
-                    token.type = (c >= '0' && c <= '9') ? TOKEN_NUMBER : TOKEN_IDENTIFIER;
+
+                case '+': case '-': case '*': case '/': case '=':
+                    token.type = TOKEN_OPERATOR;
+                    break;
+
+                default:
+                    if (c >= '0' && c <= '9')
+                        token.type = TOKEN_NUMBER;
+                    else
+                        token.type = TOKEN_IDENTIFIER;
                     break;
             }
         } else {
             bool is_number = true;
+
             for (size_t j = 0; j < part.size; j++) {
                 char ch = *(char *)get(&part, j);
                 if (ch < '0' || ch > '9') {
@@ -165,10 +231,17 @@ DynamicArray tokenize(DynamicArray parts) {
                     break;
                 }
             }
-            token.type = is_number ? TOKEN_NUMBER : TOKEN_IDENTIFIER;
+
+            if (is_number) {
+                token.type = TOKEN_NUMBER;
+            } else {
+                token.type = check_keyword(&token.value);
+            }
         }
+
         push_back(&tokens, &token);
     }
+
     return tokens;
 }
 
