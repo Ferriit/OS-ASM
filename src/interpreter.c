@@ -1,40 +1,30 @@
 #include "interpreter.h"
+#include "parser.h"
 
-typedef enum {
-    TOKEN_IDENTIFIER,
-    TOKEN_NUMBER,
-    TOKEN_STRING,
-    TOKEN_OPERATOR,
-    TOKEN_CHAR,
-    TOKEN_SEMICOLON,
-    TOKEN_COMMA,
-    TOKEN_LPAREN,
-    TOKEN_RPAREN,
-    TOKEN_LBRACE,
-    TOKEN_RBRACE,
-    TOKEN_EOF,
+int isType(TokenType type) {
+    return type >= KEYWORD_INT && type <= KEYWORD_VOID;
+}
 
-    TOKEN_KEYWORD_START,
+Token* consume(Parser *p, TokenType type, const char *msg) {
+    Token *tok = peek(p);
+    if (tok->type != type) {
+        printf("Parser error: %s\n", msg);
+        exit(1);
+    }
+    return advance(p);
+}
 
-    KEYWORD_INT,
-    KEYWORD_STR,
-    KEYWORD_CHAR,
-    KEYWORD_BOOL,
-    KEYWORD_HASH,
-    KEYWORD_ARR,
-    KEYWORD_VOID,
-    KEYWORD_FUNC,
-    KEYWORD_RETURN,
-    KEYWORD_IF,
-    KEYWORD_ELSE,
+int check(Parser *p, TokenType type) {
+    return peek(p)->type == type;
+}
 
-    TOKEN_KEYWORD_END
-} TokenType;
-
-typedef struct {
-    TokenType type;
-    DynamicArray value;
-} Token;
+void parseFunctionSignature(Parser *p) {
+    advance(p);
+    expect(p, TOKEN_IDENTIFIER);
+    expect(p, TOKEN_LPAREN);
+    parseParameters(p);
+    expect(p, TOKEN_RPAREN);
+}
 
 void printToken(Token tok) {
     const char *type_str = "";
@@ -67,6 +57,7 @@ void printToken(Token tok) {
         case KEYWORD_RETURN:	type_str = "K_RETURN";	break;
         case KEYWORD_IF:		type_str = "K_IF";		break;
         case KEYWORD_ELSE:		type_str = "K_ELSE";	break;
+        case KEYWORD_USING:     type_str = "K_USING";	break; 
     }
 
     printf("%-12s : ", type_str);
@@ -239,10 +230,247 @@ DynamicArray tokenize(DynamicArray parts) {
             }
         }
 
+        if (token.value.size == 0) continue;
+        if (token.value.size == 1 && *(char*)get(&token.value,0) == '\0') continue;
         push_back(&tokens, &token);
     }
 
+    Token eof = {0};
+    eof.type = TOKEN_EOF;
+    init_array(&eof.value, sizeof(char));
+    push_back(&tokens, &eof);
+
     return tokens;
+}
+
+Token* peek(Parser *p) {
+    return get(p->tokens, p->pos);
+}
+
+Token* advance(Parser *p) {
+    return get(p->tokens, p->pos++);
+}
+
+bool match(Parser *p, TokenType type) {
+    if (peek(p)->type == type) {
+        p->pos++;
+        return true;
+    }
+    return false;
+}
+
+void expect(Parser *p, TokenType type) {
+    if (!match(p, type)) {
+        printf("Parser error: expected token %d\n", type);
+        exit(1);
+    }
+}
+
+void parseFactor(Parser *p) {
+    Token *tok = peek(p);
+
+    if (tok->type == TOKEN_NUMBER ||
+        tok->type == TOKEN_STRING ||
+        tok->type == TOKEN_CHAR) {
+
+        advance(p);
+        return;
+    }
+    if (tok->type == TOKEN_IDENTIFIER) {
+        advance(p);
+
+        // function call
+        if (match(p, TOKEN_LPAREN)) {
+            if (!match(p, TOKEN_RPAREN)) {
+                while (1) {
+                    parseExpression(p);
+
+                    if (match(p, TOKEN_RPAREN))
+                        break;
+
+                    expect(p, TOKEN_COMMA);
+                }
+            }
+        }
+        return;
+    }
+    if (match(p, TOKEN_LPAREN)) {
+        parseExpression(p);
+        expect(p, TOKEN_RPAREN);
+        return;
+    }
+
+    printf("Parser error: invalid factor\n");
+    exit(1);
+}
+
+void parseTerm(Parser *p) {
+    parseFactor(p);
+
+    while (1) {
+        Token *tok = peek(p);
+
+        if (tok->type == TOKEN_OPERATOR) {
+            char op = *(char*)get(&tok->value,0);
+
+            if (op == '*' || op == '/') {
+                advance(p);
+                parseFactor(p);
+                continue;
+            }
+        }
+        break;
+    }
+}
+
+void parseExpression(Parser *p) {
+    parseTerm(p);
+
+    while (1) {
+        Token *tok = peek(p);
+
+        if (tok->type == TOKEN_OPERATOR) {
+            char op = *(char*)get(&tok->value,0);
+
+            if (op == '+' || op == '-') {
+                advance(p);
+                parseTerm(p);
+                continue;
+            }
+        }
+
+        break;
+    }
+}
+
+void parseParameters(Parser *p) {
+    if (peek(p)->type == TOKEN_RPAREN)
+        return;
+
+    while (1) {
+        advance(p); // type
+        expect(p, TOKEN_IDENTIFIER);
+
+        if (!match(p, TOKEN_COMMA)) break;
+    }
+}
+
+void parseStatement(Parser *p) {
+    if (match(p, KEYWORD_IF)) {
+        parseIf(p);
+        return;
+    }
+    if (match(p, KEYWORD_RETURN)) {
+        parseReturn(p);
+        return;
+    }
+    if (isType(peek(p)->type)) {
+        parseVariable(p);
+        return;
+    }
+    if (peek(p)->type == TOKEN_IDENTIFIER) {
+        parseInstructionOrCall(p);
+        return;
+    }
+
+    printf("Parser error: invalid statement\n");
+    exit(1);
+}
+
+void parseVariable(Parser *p) {
+    TokenType type = advance(p)->type;
+    Token *name = consume(p, TOKEN_IDENTIFIER, "Expected variable name");
+
+    if (match(p, TOKEN_OPERATOR)) {   // '='
+        parseExpression(p);
+    }
+    consume(p, TOKEN_SEMICOLON, "Expected ';' after variable declaration");
+}
+
+void parseReturn(Parser *p) {
+    if (!check(p, TOKEN_SEMICOLON)) {
+        parseExpression(p);
+    }
+    consume(p, TOKEN_SEMICOLON, "Expected ';' after return");
+}
+
+void parseIf(Parser *p) {
+    consume(p, TOKEN_LPAREN, "Expected '(' after if");
+    parseExpression(p);
+    consume(p, TOKEN_RPAREN, "Expected ')'");
+
+    consume(p, TOKEN_LBRACE, "Expected '{'");
+
+    while (!check(p, TOKEN_RBRACE)) {
+        parseStatement(p);
+    }
+    consume(p, TOKEN_RBRACE, "Expected '}'");
+    if (match(p, KEYWORD_ELSE)) {
+        consume(p, TOKEN_LBRACE, "Expected '{' after else");
+
+        while (!check(p, TOKEN_RBRACE)) {
+            parseStatement(p);
+        }
+        consume(p, TOKEN_RBRACE, "Expected '}'");
+    }
+}
+
+void parseInstructionOrCall(Parser *p) {
+    Token *name = consume(p, TOKEN_IDENTIFIER, "Expected identifier");
+
+    if (match(p, TOKEN_LPAREN)) {
+        if (!check(p, TOKEN_RPAREN)) {
+            do {
+                parseExpression(p);
+            } while (match(p, TOKEN_COMMA));
+        }
+        consume(p, TOKEN_RPAREN, "Expected ')'");
+    }
+    else {
+        parseExpression(p);
+    }
+
+    consume(p, TOKEN_SEMICOLON, "Expected ';'");
+}
+
+void parseImport(Parser *p) {
+    Token *file = consume(p, TOKEN_STRING, "Expected script name");
+
+    consume(p, TOKEN_SEMICOLON, "Expected ';' after import");
+}
+
+void parseFunction(Parser *p) {
+    parseFunctionSignature(p);
+
+    consume(p, TOKEN_LBRACE, "Expected '{' after function declaration");
+
+    while (!check(p, TOKEN_RBRACE)) {
+        parseStatement(p);
+    }
+
+    consume(p, TOKEN_RBRACE, "Expected '}' after function body");
+}
+
+Parser* parser(DynamicArray *tokens) {
+    Parser *p = alloc(sizeof(Parser));
+    p->tokens = tokens; // point to a valid array
+    p->pos = 0;
+
+    while (peek(p)->type != TOKEN_EOF) {
+        if (match(p, KEYWORD_FUNC)) parseFunction(p);
+        else if (match(p, KEYWORD_USING)) parseImport(p);
+        else {
+            Token *t = peek(p);
+            if (t->type == TOKEN_IDENTIFIER && t->value.size == 0) {
+                advance(p);
+                continue;
+            }
+            printf("Parser error: unexpected token\n");
+            exit(1);
+        }
+    }
+
+    return p;
 }
 
 int entry(int argc, char** argv) {
@@ -257,5 +485,11 @@ int entry(int argc, char** argv) {
         Token token = *(Token *)get(&tok, i);
         printToken(token);
     }
+
+    Parser* p = parser(&tok);
+
+    free_array(p->tokens);
+    free_array(&tok);
+    
     return 0;
 }
